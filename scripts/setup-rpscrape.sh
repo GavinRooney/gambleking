@@ -1,25 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ─── Check Python 3.13+ ─────────────────────────────────────────────────────
+# ─── Find Python 3.13+ ───────────────────────────────────────────────────────
 
-if ! command -v python3 &>/dev/null; then
-  echo "Error: python3 is not installed."
-  echo "rpscrape requires Python 3.13+. Install from https://www.python.org/downloads/"
+PYTHON=""
+for candidate in python3.13 python3; do
+  if command -v "$candidate" &>/dev/null; then
+    PY_VERSION=$("$candidate" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    PY_MAJOR=$(echo "$PY_VERSION" | cut -d. -f1)
+    PY_MINOR=$(echo "$PY_VERSION" | cut -d. -f2)
+    if [ "$PY_MAJOR" -ge 3 ] && [ "$PY_MINOR" -ge 13 ]; then
+      PYTHON="$candidate"
+      break
+    fi
+  fi
+done
+
+if [ -z "$PYTHON" ]; then
+  echo "Error: Python 3.13+ not found."
+  echo "Install from https://www.python.org/downloads/ or: brew install python@3.13"
   exit 1
 fi
 
-PY_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-PY_MAJOR=$(echo "$PY_VERSION" | cut -d. -f1)
-PY_MINOR=$(echo "$PY_VERSION" | cut -d. -f2)
-
-if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 13 ]; }; then
-  echo "Error: Python $PY_VERSION found, but rpscrape requires Python 3.13+."
-  echo "Install from https://www.python.org/downloads/"
-  exit 1
+PIP="${PYTHON/python/pip}"
+if ! command -v "$PIP" &>/dev/null; then
+  PIP="$PYTHON -m pip"
 fi
 
-echo "Python $PY_VERSION found."
+echo "Using $PYTHON ($PY_VERSION)"
 
 # ─── Clone rpscrape ──────────────────────────────────────────────────────────
 
@@ -36,9 +44,12 @@ fi
 
 # ─── Install Python dependencies ─────────────────────────────────────────────
 
-echo "Installing Python dependencies..."
+echo "Setting up Python virtual environment..."
 cd "$RPSCRAPE_DIR"
-pip3 install -r requirements.txt
+$PYTHON -m venv .venv
+source .venv/bin/activate
+echo "Installing Python dependencies..."
+pip install -r requirements.txt
 
 # ─── Configure rpscrape output columns ───────────────────────────────────────
 
@@ -61,8 +72,9 @@ echo ""
 echo "Setup complete! Now run the scraper:"
 echo ""
 echo "  cd $RPSCRAPE_DIR"
-echo "  python3 scripts/rpscrape.py -r gb -y 2020-2025"
-echo "  python3 scripts/rpscrape.py -r ire -y 2020-2025"
+echo "  source .venv/bin/activate"
+echo "  python scripts/rpscrape.py -r gb -y 2020-2025"
+echo "  python scripts/rpscrape.py -r ire -y 2020-2025"
 echo ""
 echo "Then import the data:"
 echo ""
