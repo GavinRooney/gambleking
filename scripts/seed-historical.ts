@@ -14,6 +14,7 @@
  *   npx tsx scripts/seed-historical.ts ./rpscrape/data
  */
 
+import "dotenv/config";
 import fs from "fs";
 import path from "path";
 import { PrismaClient } from "../src/generated/prisma/client";
