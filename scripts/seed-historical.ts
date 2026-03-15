@@ -390,23 +390,25 @@ async function main() {
     process.exit(1);
   }
 
-  // Find CSV files (also check subdirectories one level deep)
-  let csvFiles: string[] = [];
-  const entries = fs.readdirSync(resolvedDir, { withFileTypes: true });
-  for (const entry of entries) {
-    const fullPath = path.join(resolvedDir, entry.name);
-    if (entry.isFile() && entry.name.endsWith(".csv")) {
-      csvFiles.push(fullPath);
-    } else if (entry.isDirectory()) {
-      const subFiles = fs.readdirSync(fullPath)
-        .filter((f) => f.endsWith(".csv"))
-        .map((f) => path.join(fullPath, f));
-      csvFiles.push(...subFiles);
+  // Find CSV files recursively
+  function findCsvFiles(dir: string): string[] {
+    const found: string[] = [];
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isFile() && entry.name.endsWith(".csv")) {
+        found.push(fullPath);
+      } else if (entry.isDirectory()) {
+        found.push(...findCsvFiles(fullPath));
+      }
     }
+    return found;
   }
 
+  const csvFiles = findCsvFiles(resolvedDir);
+
   if (csvFiles.length === 0) {
-    console.error("No CSV files found in directory (or one level of subdirectories).");
+    console.error("No CSV files found in directory (searched recursively).");
     process.exit(1);
   }
 
