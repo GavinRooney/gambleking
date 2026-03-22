@@ -304,6 +304,103 @@ Only show factors with weight > 0 for this race type (skip drawPosition for hurd
 
 ---
 
+## Part 3: Value Bets & Vulnerable Favourites
+
+### 3.1 Problem
+
+The current best-bets system ranks by GambleKing score, which often just confirms the market favourite. Betting the favourite in every race is not a profitable strategy — the odds are too short to generate returns. The real value is in finding races where the favourite has exploitable weaknesses and a non-favourite has strong fundamentals.
+
+### 3.2 Vulnerable Favourite Detection
+
+**New module:** `src/lib/scoring/value-bets.ts`
+
+A favourite is flagged as **vulnerable** when BOTH conditions are met:
+
+1. **The favourite has at least one clear weakness** — any factor in their breakdown scores below 40 (e.g. going doesn't suit, rising in class, returning from long break)
+2. **A non-favourite is competitive** — the GambleKing score gap between the favourite (marketRank=1) and the highest-scoring non-favourite is 8 points or less, OR a non-favourite actually outscores the favourite
+
+The function `getValueBets(date)` returns a list of `ValueBet` objects:
+
+```typescript
+interface ValueBet {
+  race: { /* same shape as BestBet.race */ };
+  favourite: {
+    horse: { name: string; id: string };
+    gamblekingScore: number;
+    weaknesses: string[];       // human-readable: "Struggles on soft ground", "Rising in class"
+    scoreBreakdown: FactorBreakdown;
+  };
+  valuePick: {
+    horse: { name: string; id: string };
+    gamblekingScore: number;
+    oddsBest: number | null;
+    narrative: string;          // from narrative.ts
+    scoreBreakdown: FactorBreakdown;
+    jockey: { name: string } | null;
+    trainer: { name: string } | null;
+  };
+  scoreGapToFav: number;        // negative means value pick outscores favourite
+  vulnerabilityReason: string;  // one-line summary: "Favourite weak on going — X has better profile"
+}
+```
+
+**Weakness detection** maps factor scores to readable strings:
+
+| Factor | Score < 40 | Weakness text |
+|---|---|---|
+| recentForm | < 40 | "Poor recent form" |
+| goingPreference | < 40 | "Struggles on {going}" |
+| distanceSuitability | < 40 | "Unproven at this trip" |
+| classChange | < 40 | "Rising in class" |
+| freshness | < 40 | "Returning from long absence" |
+| courseForm | < 40 | "No course form" |
+| rpr | < 40 | "RPR below field average" |
+| weightCarried | < 40 | "Carrying top weight" |
+| drawPosition | < 40 | "Unfavourable draw" |
+
+**Value pick selection:** Among non-favourites (marketRank > 1), take the runner with the highest GambleKing score. If that runner also has a clear strength (any factor >= 70) in an area where the favourite is weak (< 40), boost the vulnerability confidence.
+
+**Sorting:** Value bets are sorted by vulnerability strength:
+1. Non-favourite outscores favourite (strongest signal)
+2. Score gap <= 4 points + favourite has 2+ weaknesses
+3. Score gap <= 8 points + favourite has 1 weakness
+
+### 3.3 Value Mode Toggle (Best Bets Page)
+
+**UI change to `src/app/best-bets/page.tsx`:**
+
+Add a toggle at the top of the best bets page:
+
+```
+[All Picks] [Value Bets]
+```
+
+- **All Picks** (default) — current behaviour, shows highest-scoring runners across all races
+- **Value Bets** — shows only races where the favourite is vulnerable, recommending the non-favourite alternative
+
+When Value Bets is active:
+- The page calls `GET /api/best-bets?mode=value`
+- Each card shows:
+  - The race details (same as now)
+  - The **value pick** (non-favourite) as the headline horse
+  - A callout box: *"Favourite {name} vulnerable: {weakness reasons}. Consider {value pick name} at {odds}."*
+  - The value pick's narrative summary
+  - The value pick's score breakdown (if expanded)
+
+### 3.4 API Changes
+
+**`GET /api/best-bets`** — add optional `mode` query param:
+- `mode=all` (default) — current behaviour via `getBestBets(date)`
+- `mode=value` — calls new `getValueBets(date)` from `value-bets.ts`
+
+### 3.5 Race Detail Page Integration
+
+On the race detail page (`races/[raceId]/page.tsx`), when the favourite has vulnerabilities:
+- Show a banner below the race header: **"Favourite may be beatable"** with the weakness reasons
+- This uses the same detection logic but applied to a single race (can be a utility function reused from `value-bets.ts`)
+
+---
+
 ## Files Changed
 
 ### Schema
@@ -324,14 +421,16 @@ Only show factors with weight > 0 for this race type (skip drawPosition for hurd
 
 ### API
 - `src/app/api/races/[raceId]/route.ts` — no changes needed (Prisma will include new fields automatically)
+- `src/app/api/best-bets/route.ts` — add `mode` query param support (`all` | `value`)
 
 ### Frontend
 - `src/components/score-breakdown.tsx` — rewrite with factor bar chart and narrative
-- `src/app/races/[raceId]/page.tsx` — integrate breakdown component into runner expand panel
-- `src/app/best-bets/page.tsx` — show narrative summary instead of/alongside reasons array
+- `src/app/races/[raceId]/page.tsx` — integrate breakdown component into runner expand panel; add "Favourite may be beatable" banner
+- `src/app/best-bets/page.tsx` — add All Picks / Value Bets toggle; show narrative summary; show value bet cards with vulnerability callout
 
-### Best Bets
+### Best Bets & Value Bets
 - `src/lib/scoring/best-bets.ts` — read `scoreBreakdown` from DB instead of faking factors
+- New: `src/lib/scoring/value-bets.ts` — vulnerable favourite detection and value pick selection
 
 ---
 
@@ -355,4 +454,4 @@ All new columns are nullable, so no data backfill is required. After migration, 
 - Topspeed (`ts`) rating — API provides it but it's less reliable than RPR; can be added later
 - Age/sex adjustments — meaningful but lower priority than the above
 - Confidence level overhaul — current 3-tier system is adequate for now
-- Odds-based scoring improvements — `marketRank` proxy is sufficient until live odds integration
+- Full expected-value calculations (score vs odds) — would need live odds integration; current approach uses score-gap + weakness detection as a proxy for value

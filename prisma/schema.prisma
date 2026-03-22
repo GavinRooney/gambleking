@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -9,4 +6,168 @@ generator client {
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
+}
+
+model Horse {
+  id                  String               @id @default(cuid())
+  name                String
+  age                 Int?
+  sex                 String?
+  sire                String?
+  dam                 String?
+  trainerId           String?
+  trainer             Trainer?             @relation(fields: [trainerId], references: [id])
+  owner               String?
+  flatRating          Int?
+  hurdlesRating       Int?
+  runners             Runner[]
+  goingPreferences    GoingPreference[]
+  distancePreferences DistancePreference[]
+  courseForm          CourseForm[]
+  raceComments        RaceComment[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+}
+
+model Race {
+  id              String   @id @default(cuid())
+  externalId      String?  @unique
+  date            DateTime
+  courseId         String
+  course          Course   @relation(fields: [courseId], references: [id])
+  raceName        String
+  raceType        String   // flat | hurdle | chase
+  class           Int?
+  distanceFurlongs Float
+  going           String?
+  prizeMoney      Int?
+  numRunners      Int?
+  weatherForecast String?
+  replayUrl       String?
+  runners         Runner[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Runner {
+  id              String   @id @default(cuid())
+  raceId          String
+  race            Race     @relation(fields: [raceId], references: [id])
+  horseId         String
+  horse           Horse    @relation(fields: [horseId], references: [id])
+  jockeyId        String?
+  jockey          Jockey?  @relation(fields: [jockeyId], references: [id])
+  trainerId       String?
+  trainer         Trainer? @relation(fields: [trainerId], references: [id])
+  drawPosition    Int?
+  weightCarried   String?
+  officialRating  Int?
+  oddsSp          Float?
+  oddsBest        Float?
+  marketRank      Int?
+  gamblekingScore Float?
+  confidenceLevel String?  // strong | moderate | speculative
+  finishPosition  Int?
+  beatenDistance   Float?
+  bets            Bet[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([raceId, horseId])
+}
+
+model Course {
+  id           String       @id @default(cuid())
+  name         String       @unique
+  country      String       // UK | IRE
+  surface      String?      // turf | aw
+  direction    String?      // left | right
+  courseType   String?      // flat | jumps | dual
+  drawBiasData String?      // JSON stored as string for SQLite
+  races        Race[]
+  courseForm   CourseForm[]
+}
+
+model Jockey {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  flatWins      Int      @default(0)
+  hurdleWins    Int      @default(0)
+  strikeRate14d Float?
+  strikeRate30d Float?
+  runners       Runner[]
+}
+
+model Trainer {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  flatWins      Int      @default(0)
+  hurdleWins    Int      @default(0)
+  strikeRate14d Float?
+  strikeRate30d Float?
+  runners       Runner[]
+  horses        Horse[]
+}
+
+model Bet {
+  id         String   @id @default(cuid())
+  runnerId   String
+  runner     Runner   @relation(fields: [runnerId], references: [id])
+  stake      Float
+  oddsTaken  Float
+  betType    String   // win | each_way
+  outcome    String   @default("pending") // pending | won | lost
+  profitLoss Float?
+  notes      String?
+  createdAt  DateTime @default(now())
+}
+
+model GoingPreference {
+  id      String @id @default(cuid())
+  horseId String
+  horse   Horse  @relation(fields: [horseId], references: [id])
+  going   String // firm | good | good_to_soft | soft | heavy
+  runs    Int    @default(0)
+  wins    Int    @default(0)
+  places  Int    @default(0)
+  winPct  Float  @default(0)
+
+  @@unique([horseId, going])
+}
+
+model DistancePreference {
+  id           String @id @default(cuid())
+  horseId      String
+  horse        Horse  @relation(fields: [horseId], references: [id])
+  distanceBand String // e.g. "5f-6f", "7f-8f", "9f-11f", "12f-14f", "15f+"
+  runs         Int    @default(0)
+  wins         Int    @default(0)
+  places       Int    @default(0)
+  winPct       Float  @default(0)
+
+  @@unique([horseId, distanceBand])
+}
+
+model CourseForm {
+  id       String @id @default(cuid())
+  horseId  String
+  horse    Horse  @relation(fields: [horseId], references: [id])
+  courseId  String
+  course   Course @relation(fields: [courseId], references: [id])
+  runs     Int    @default(0)
+  wins     Int    @default(0)
+  places   Int    @default(0)
+  winPct   Float  @default(0)
+
+  @@unique([horseId, courseId])
+}
+
+model RaceComment {
+  id       String   @id @default(cuid())
+  horseId  String
+  horse    Horse    @relation(fields: [horseId], references: [id])
+  raceDate DateTime
+  course   String
+  comment  String   // e.g. "Led 2 out, weakened final furlong"
+  source   String?  // manual | scraped
 }
