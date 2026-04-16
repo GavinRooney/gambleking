@@ -77,15 +77,16 @@ model Runner {
 }
 
 model Course {
-  id           String       @id @default(cuid())
-  name         String       @unique
-  country      String       // UK | IRE
-  surface      String?      // turf | aw
-  direction    String?      // left | right
-  courseType   String?      // flat | jumps | dual
-  drawBiasData String?      // JSON stored as string for SQLite
-  races        Race[]
-  courseForm   CourseForm[]
+  id             String          @id @default(cuid())
+  name           String          @unique
+  country        String          // UK | IRE
+  surface        String?         // turf | aw
+  direction      String?         // left | right
+  courseType     String?         // flat | jumps | dual
+  drawBiasData   String?         // JSON stored as string for SQLite
+  races          Race[]
+  courseForm     CourseForm[]
+  tradingMarkets TradingMarket[]
 }
 
 model Jockey {
@@ -170,4 +171,133 @@ model RaceComment {
   course   String
   comment  String   // e.g. "Led 2 out, weakened final furlong"
   source   String?  // manual | scraped
+}
+
+// ─── Trading module (Phase 1: Bet Angel integration) ────────────────────────
+// Additive models for the Betfair Exchange scalping platform.
+// Isolated from the predictor models above; no cross-relations except optional
+// Course link on TradingMarket.
+
+model TradingMarket {
+  id              String           @id @default(cuid())
+  betfairMarketId String           @unique
+  name            String
+  startTime       DateTime
+  courseId        String?
+  // SetNull: if a Course row is ever removed, trading markets survive without
+  // a course link rather than blocking the course deletion.
+  course          Course?          @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  totalMatched    Float            @default(0)
+  numRunners      Int              @default(0)
+  status          String           @default("scanning") // scanning | trading | warned | exited | closed
+  runners         TradingRunner[]
+  trades          Trade[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+model TradingRunner {
+  id              String        @id @default(cuid())
+  marketId        String
+  market          TradingMarket @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  selectionId     Int
+  horseName       String
+  bestBack        Float?
+  bestLay         Float?
+  traded          Float         @default(0)
+  volatilityScore Float?
+  bookBalance     Float?
+  trades          Trade[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@unique([marketId, selectionId])
+}
+
+model Trade {
+  id              String          @id @default(cuid())
+  sessionId       String?
+  // SetNull: sessions may be purged for analytics cleanup; trades are the
+  // primary financial audit record and must survive that.
+  session         TradingSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  marketId        String
+  // Restrict: a market with trades is immutable — the DB refuses to drop it,
+  // because an orphaned trade would lose its price context. Explicit so the
+  // behaviour isn't hidden behind Prisma's default.
+  market          TradingMarket   @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  runnerId        String
+  // Restrict: same reasoning as market — the runner links odds to horse name.
+  runner          TradingRunner   @relation(fields: [runnerId], references: [id], onDelete: Restrict)
+  entryBackPrice  Float
+  entryLayPrice   Float
+  stake           Float
+  status          String          @default("open") // open | matched | stopped | greened | forced_exit
+  profitLoss      Float           @default(0)
+  exitReason      String?         // profit | stop_loss | forced_exit
+  mode            String          // mock | practice | live
+  orders          TradeOrder[]
+  openedAt        DateTime        @default(now())
+  closedAt        DateTime?
+
+  @@index([sessionId])
+  @@index([marketId])
+  @@index([runnerId])
+  @@index([status])
+}
+
+model TradeOrder {
+  id            String   @id @default(cuid())
+  tradeId       String
+  trade         Trade    @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  side          String   // back | lay
+  purpose       String   @default("entry") // entry | close | green
+  price         Float
+  size          Float
+  matchedSize   Float    @default(0)
+  status        String   @default("unmatched") // unmatched | matched | cancelled
+  betAngelBetId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tradeId])
+  @@index([status])
+}
+
+// Singleton row. The fixed default id + primary key constraint enforces
+// single-row semantics at the DB level: a second create without an id fails
+// on duplicate key. All code MUST access this model via the helpers in
+// `src/lib/trading/strategy-config.ts` (getStrategyConfig / updateStrategyConfig)
+// rather than calling prisma.strategyConfig.* directly — the helpers own the
+// upsert pattern that keeps the invariant safe.
+model StrategyConfig {
+  id                     String   @id @default("singleton")
+  scalpStake             Float    @default(50)
+  stopLossTicks          Int      @default(2)
+  preRaceExitSeconds     Int      @default(10)
+  preRaceWarningSeconds  Int      @default(60)
+  minMarketVolume        Float    @default(50000)
+  maxConcurrentTrades    Int      @default(5)
+  dailyLossLimit         Float    @default(200)
+  maxStakePerTrade       Float    @default(200)
+  // PRD §7.4 — separate hard cap on the £ liability of any lay leg.
+  // Liability = (layPrice - 1) × stake. Protects against accidental
+  // high-odds layings (e.g. laying at 50.0 with a £50 stake = £2450 liability).
+  maxLayLiability        Float    @default(500)
+  updatedAt              DateTime @updatedAt
+}
+
+model TradingSession {
+  id            String    @id @default(cuid())
+  date          DateTime
+  mode          String    // mock | practice | live
+  startedAt     DateTime  @default(now())
+  endedAt       DateTime?
+  dailyPnL      Float     @default(0)
+  tradesOpened  Int       @default(0)
+  tradesClosed  Int       @default(0)
+  suspendedAt   DateTime?
+  trades        Trade[]
+
+  @@index([date])
+  @@index([mode])
 }

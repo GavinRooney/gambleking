@@ -11,6 +11,7 @@ import {
   BarChart3,
   Wallet,
   Settings,
+  Activity,
 } from "lucide-react";
 
 const navItems = [
@@ -19,6 +20,7 @@ const navItems = [
   { href: "/best-bets", label: "Best Bets", icon: Star },
   { href: "/bets", label: "Bet Tracker", icon: Wallet },
   { href: "/stats", label: "Stats", icon: BarChart3 },
+  { href: "/trading", label: "Trading", icon: Activity },
   { href: "/admin", label: "Admin", icon: Settings },
 ];
 
